@@ -1,8 +1,27 @@
-# Full stack: Postgres, Redis, API, email worker, Next.js UI, Nginx reverse proxy.
-# Copy deploy.env.example -> .env and set secrets, then: docker compose up -d --build
+# Email Marketing Platform — Docker Compose (Linux / cloud VPS)
 #
-# UI + API: http://localhost:${HTTP_PORT:-8080}  (same origin; no separate API URL needed)
-# OpenAPI:   http://localhost:${HTTP_PORT:-8080}/docs
+# On the server (Ubuntu/Debian example):
+#   sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
+#   git clone <your-repo> && cd email-marketing-platform
+#   cp deploy.env.example .env   # edit secrets + HTTP_PORT
+#   docker compose up -d --build
+#
+# Open cloud firewall / security group for TCP ${HTTP_PORT} (default 8080).
+# App URL: http://YOUR_SERVER_IP:${HTTP_PORT}
+#
+# Images: api builds once as BACKEND_IMAGE; worker reuses it (no duplicate pip install).
+
+name: email-marketing
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  default:
+    name: email_marketing_net
 
 services:
   db:
@@ -19,20 +38,27 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
 
   redis:
     image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
 
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: ${BACKEND_IMAGE:-email-marketing-backend:latest}
+    init: true
     command: >
       sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
@@ -59,13 +85,13 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: 90s
     restart: unless-stopped
+    logging: *default-logging
 
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ${BACKEND_IMAGE:-email-marketing-backend:latest}
+    init: true
     command: python -m app.worker.email_worker
     environment:
       SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-email_marketing}
@@ -80,6 +106,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *default-logging
 
   web:
     build:
@@ -87,6 +115,14 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        # If npm ETIMEDOUT during build: set e.g. NPM_REGISTRY=https://registry.npmmirror.com in .env
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+      # Linux only: uncomment if registry still times out (uses host DNS/network during build)
+      # network: host
+    image: ${FRONTEND_IMAGE:-email-marketing-web:latest}
+    init: true
+    environment:
+      NODE_ENV: production
     depends_on:
       api:
         condition: service_healthy
@@ -101,21 +137,25 @@ services:
       interval: 20s
       timeout: 5s
       retries: 5
-      start_period: 45s
+      start_period: 120s
     restart: unless-stopped
+    logging: *default-logging
 
   nginx:
     build:
       context: ./nginx
       dockerfile: Dockerfile
+    image: ${PROXY_IMAGE:-email-marketing-nginx:latest}
     ports:
-      - "${HTTP_PORT:-8080}:80"
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-8080}:80"
     depends_on:
       api:
         condition: service_healthy
       web:
         condition: service_healthy
     restart: unless-stopped
+    logging: *default-logging
 
 volumes:
   pgdata:
+  redisdata:

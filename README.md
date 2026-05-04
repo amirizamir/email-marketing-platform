@@ -4,6 +4,32 @@
 
 ## Deploy with Docker (recommended)
 
+### Linux cloud VM (VPS, EC2, etc.)
+
+On the server (Ubuntu/Debian-style):
+
+```bash
+sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
+sudo usermod -aG docker "$USER"   # log out/in to apply
+git clone <your-repo-url> && cd email-marketing-platform
+cp deploy.env.example .env
+nano .env   # set SECRET_KEY, ENCRYPTION_KEY, POSTGRES_PASSWORD, HTTP_PORT
+docker compose up -d --build
+```
+
+**Firewall:** allow inbound TCP on **`HTTP_PORT`** (default `8080`). Example with UFW:
+
+```bash
+sudo ufw allow ${HTTP_PORT:-8080}/tcp
+sudo ufw enable
+```
+
+Then open **`http://YOUR_PUBLIC_IP:8080`** (or port `80` if you set `HTTP_PORT=80`).
+
+The Compose file uses project name **`email-marketing`**, a dedicated network **`email_marketing_net`**, **Redis AOF persistence**, **log rotation** for containers, and a **single backend image** for both `api` and `worker` (faster builds). Only **nginx** publishes a host port; Postgres and Redis stay on the internal Docker network.
+
+### Any machine (same steps)
+
 1. **Create environment file** in the project root (next to `docker-compose.yml`):
 
    ```bash
@@ -24,13 +50,47 @@
 
 4. **Open the app** (default port **8080** — see `HTTP_PORT` in `.env`):
 
-   - **UI + API (same origin):** `http://localhost:8080`  
-   - **OpenAPI:** `http://localhost:8080/docs`  
-   - **API health:** `http://localhost:8080/health`  
+   - **UI + API (same origin):** `http://<host>:8080`  
+   - **OpenAPI:** `http://<host>:8080/docs`  
+   - **API health:** `http://<host>:8080/health`  
 
 Nginx routes `/` to the Next.js app and `/api/...` to FastAPI, so the browser does **not** need `NEXT_PUBLIC_API_URL` (leave it empty in `.env`).
 
-Services: **Postgres** (data), **Redis** (queue + rate keys), **api** (migrations on boot), **worker** (sends mail), **web** (Next.js), **nginx** (entry point). Database and Redis are **not** exposed to the host by default (internal network only).
+Services: **Postgres** (data), **Redis** (queue + rate keys + persistence volume), **api** (migrations on boot), **worker** (same image as api — sends mail), **web** (Next.js), **nginx** (entry point).
+
+### Web image build: npm `ETIMEDOUT` (registry.npmjs.org)
+
+The frontend `Dockerfile` uses **BuildKit**, an npm **cache mount**, **`RUN --network=host`** on the deps step (Linux: uses the host network; fixes many registry timeouts), and **`frontend/docker-install-deps.sh`**, which retries in order:
+
+1. `NPM_REGISTRY` from `.env` (if set)  
+2. `https://registry.npmjs.org`  
+3. `https://registry.npmmirror.com`
+
+On older daemons: `export DOCKER_BUILDKIT=1`.
+
+**Still timing out?** Set a mirror in `.env` and rebuild the web image only:
+
+```env
+NPM_REGISTRY=https://registry.npmmirror.com
+```
+
+```bash
+docker compose build web --no-cache
+```
+
+**Lockfile (fewer requests):**
+
+```bash
+chmod +x scripts/gen-frontend-lockfile.sh
+./scripts/gen-frontend-lockfile.sh
+git add frontend/package-lock.json && git commit -m "Add npm lockfile for Docker"
+```
+
+**Linux:** uncomment `network: host` under `web.build` in `docker-compose.yml` if you need the whole build to use host networking.
+
+**Proxy:** set `HTTP_PROXY` / `HTTPS_PROXY` on the host before `docker compose build`, or add them as build args in `frontend/Dockerfile`.
+
+**Docker Desktop (Windows/Mac):** `RUN --network=host` is only fully supported on **Linux** builders; build the `web` image on the Linux server, or use WSL2.
 
 ### Optional: API on a different host than the UI
 

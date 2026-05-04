@@ -1,13 +1,40 @@
-# Build argument: leave empty when nginx proxies /api/* to the FastAPI service (recommended).
+# syntax=docker/dockerfile:1.4
+#
+# Fixes common cloud build failures: ETIMEDOUT to registry.npmjs.org
+# 1) RUN --network=host — uses host DNS/routing (Linux Docker; most reliable fix)
+# 2) docker-install-deps.sh — retries official npm + npmmirror
+# 3) Optional: set NPM_REGISTRY in .env for your region / corp mirror
+#
+# Requires BuildKit: DOCKER_BUILDKIT=1 (default on modern Docker)
+
 ARG NEXT_PUBLIC_API_URL=
 
-FROM node:20-alpine AS deps
+FROM node:20-bookworm-slim AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install
 
-FROM node:20-alpine AS builder
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json* .npmrc ./
+COPY docker-install-deps.sh /tmp/docker-install-deps.sh
+RUN chmod +x /tmp/docker-install-deps.sh
+
+# Build-arg passed into the script (empty = skip)
+ARG NPM_REGISTRY
+ENV NPM_REGISTRY_OVERRIDE=${NPM_REGISTRY}
+
+# --network=host: critical on many VPS / cloud images where bridge DNS times out
+RUN --network=host --mount=type=cache,target=/root/.npm,id=npm-cache \
+    /tmp/docker-install-deps.sh
+
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
@@ -17,14 +44,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nextjs
 
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
