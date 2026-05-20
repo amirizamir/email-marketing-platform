@@ -10,13 +10,14 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "001"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-campaign_status = sa.Enum(
+campaign_status = postgresql.ENUM(
     "draft",
     "scheduled",
     "running",
@@ -25,7 +26,7 @@ campaign_status = sa.Enum(
     name="campaign_status",
     create_type=False,
 )
-email_job_status = sa.Enum("pending", "sent", "failed", name="email_job_status", create_type=False)
+email_job_status = postgresql.ENUM("pending", "sent", "failed", name="email_job_status", create_type=False)
 
 
 def upgrade() -> None:
