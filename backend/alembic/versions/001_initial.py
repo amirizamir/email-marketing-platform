@@ -17,9 +17,15 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 campaign_status = sa.Enum(
-    "draft", "scheduled", "running", "paused", "completed", name="campaign_status"
+    "draft",
+    "scheduled",
+    "running",
+    "paused",
+    "completed",
+    name="campaign_status",
+    create_type=False,
 )
-email_job_status = sa.Enum("pending", "sent", "failed", name="email_job_status")
+email_job_status = sa.Enum("pending", "sent", "failed", name="email_job_status", create_type=False)
 
 
 def upgrade() -> None:
