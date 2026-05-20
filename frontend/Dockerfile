@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1.4
 #
 # Fixes common cloud build failures: ETIMEDOUT to registry.npmjs.org
-# 1) RUN --network=host — uses host DNS/routing (Linux Docker; most reliable fix)
-# 2) docker-install-deps.sh — retries official npm + npmmirror
-# 3) Optional: set NPM_REGISTRY in .env for your region / corp mirror
+# 1) docker-install-deps.sh — retries official npm + npmmirror
+# 2) Optional: set NPM_REGISTRY in .env for your region / corp mirror
+# (Avoid RUN --network=host: Docker Desktop / many CI builders disallow the
+#  network.host BuildKit entitlement unless explicitly enabled.)
 #
 # Requires BuildKit: DOCKER_BUILDKIT=1 (default on modern Docker)
 
@@ -24,8 +25,7 @@ RUN chmod +x /tmp/docker-install-deps.sh
 ARG NPM_REGISTRY
 ENV NPM_REGISTRY_OVERRIDE=${NPM_REGISTRY}
 
-# --network=host: critical on many VPS / cloud images where bridge DNS times out
-RUN --network=host --mount=type=cache,target=/root/.npm,id=npm-cache \
+RUN --mount=type=cache,target=/root/.npm,id=npm-cache \
     /tmp/docker-install-deps.sh
 
 FROM node:20-bookworm-slim AS builder

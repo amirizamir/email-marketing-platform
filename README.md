@@ -60,7 +60,7 @@ Services: **Postgres** (data), **Redis** (queue + rate keys + persistence volume
 
 ### Web image build: npm `ETIMEDOUT` (registry.npmjs.org)
 
-The frontend `Dockerfile` uses **BuildKit**, an npm **cache mount**, **`RUN --network=host`** on the deps step (Linux: uses the host network; fixes many registry timeouts), and **`frontend/docker-install-deps.sh`**, which retries in order:
+The frontend `Dockerfile` uses **BuildKit**, an npm **cache mount**, and **`frontend/docker-install-deps.sh`**, which retries in order:
 
 1. `NPM_REGISTRY` from `.env` (if set)  
 2. `https://registry.npmjs.org`  
@@ -86,11 +86,11 @@ chmod +x scripts/gen-frontend-lockfile.sh
 git add frontend/package-lock.json && git commit -m "Add npm lockfile for Docker"
 ```
 
-**Linux:** uncomment `network: host` under `web.build` in `docker-compose.yml` if you need the whole build to use host networking.
+**Linux:** if bridge DNS still fails, try uncommenting `network: host` under `web.build` in `docker-compose.yml` (may require a Linux builder with host networking allowed).
 
 **Proxy:** set `HTTP_PROXY` / `HTTPS_PROXY` on the host before `docker compose build`, or add them as build args in `frontend/Dockerfile`.
 
-**Docker Desktop (Windows/Mac):** `RUN --network=host` is only fully supported on **Linux** builders; build the `web` image on the Linux server, or use WSL2.
+**Docker Desktop (Windows/Mac):** builds use the default build network (no `network.host` entitlement). Use `NPM_REGISTRY` or a proxy if the registry is unreachable.
 
 ### Optional: API on a different host than the UI
 
